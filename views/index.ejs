@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<title>BPM Spotify</title>
+
+	<!-- CSS -->
+    <link rel="stylesheet" href="//maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" integrity="sha384-BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u" crossorigin="anonymous">
+	<style>
+		body {
+			padding-top:50px;
+		}
+        .album-bg {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -2;
+            background-size: cover !important;
+        }
+        .jumbotron {
+            opacity: 0.9;
+        }
+        .jumbotron .huge {
+            font-size: 190pt;
+        }
+        .center {
+            text-align: center;
+        }
+        .glyphicon-lg {
+            font-size: 300%;
+        }
+        .controls {
+            text-align: center;
+        }
+        .controls .glyphicon {
+            margin: 10px;
+        }
+        .controls .glyphicon:hover { cursor: pointer; }
+        .controls .glyphicon:active { color: lavenderblush; }
+	</style>
+</head>
+<body class="container">
+
+	<header>
+	</header>
+
+	<main>
+        <div class="album-bg"></div>
+		<div class="jumbotron">
+			<h2 id="song">Please log in!</h2>
+			<p id="bpm" class="huge center"></p>
+			<p id="bpm-conf" class="center" ></p>
+			<% if (!session.accessToken) { %>
+			<p>
+				<a class="btn btn-primary" href="<%= authorizeURL %>">LOGIN</a>
+			</p>
+			<% } else { %>
+            <p class="controls">
+                <span data-event="prev" class="glyphicon glyphicon-lg glyphicon-fast-backward"></span>
+                <span data-event="play" class="glyphicon glyphicon-lg glyphicon-play"></span>
+                <span data-event="pause" class="glyphicon glyphicon-lg glyphicon-pause"></span>
+                <span data-event="next" class="glyphicon glyphicon-lg glyphicon-fast-forward"></span>
+            </p>
+            <% } %>
+		</div>
+	</main>
+
+	<footer>
+
+	</footer>
+	<script type="text/javascript">
+        var connected = <%= session.accessToken ? "true" : "false" %>;
+        var timerId = null;
+
+        const messages = {
+            '': function (msg) {},
+            'player': function (msg) {
+                const title = msg.item.name + ' - ' + (msg.item.artists || []).map(s => s.name).join(', ');
+
+                text('song', title);
+
+                const progress_ms = msg.progress_ms;
+                const duration_ms = msg.item.duration_ms;
+
+                if (timerId) clearTimeout(timerId);
+                timerId = setTimeout(function updateEnd() {
+                    send('player')
+                }, Math.min(duration_ms - progress_ms, 15000));
+
+                send('analysis', {uri: msg.item.uri});
+
+                const images = msg.item.album.images;
+                images.sort(function (lhs, rhs) {
+                    return lhs.height - rhs.height;
+                })
+
+                const biggest = images.pop();
+                bg(biggest.url);
+
+            },
+            'analysis': function (msg) {
+                const bpm = Math.round(msg.track.tempo);
+                const confidence = Math.round(msg.track.tempo_confidence * 100);
+                text('bpm', bpm + " bpm");
+                text('bpm-conf', "BPM confidence: " + confidence + " %");
+                title(bpm + " bpm");
+            }
+        };
+
+        function text(id, content) {
+            document.getElementById(id).innerText = content;
+        }
+
+        function title(text) {
+            document.title = text;
+        }
+
+        function bg(url) {
+            const className = 'album-bg';
+            document.getElementsByClassName(className)[0].style.backgroundImage = "url('" + url + "')";
+            document.getElementsByClassName(className)[0].style.backgroundPosition = "center center";
+            document.getElementsByClassName(className)[0].style.backgroundRepeat = "no-repeat";
+            document.getElementsByClassName(className)[0].style.backgroundAttachment = "fixed";
+            document.getElementsByClassName(className)[0].style.webkitFilter = "blur(5px)";
+        }
+
+        function log(msg) {
+			return console.debug(msg);
+            var elm = document.getElementById('log');
+            elm.innerHTML = elm.innerHTML + "\n> " + new Date().toTimeString() + "\t" + msg;
+        }
+        var wsUrl = window.location.href.replace('http', 'ws') + 'state'
+		var connection = new WebSocket(wsUrl, ['soap', 'xmpp']);
+
+        // When the connection is open, send some data to the server
+        connection.onopen = function () {
+            send('session');
+
+            if (connected) {
+                send('start');
+                send('player');
+            }
+        };
+
+        // Log errors
+        connection.onerror = function (error) {
+            log('error:' + error);
+        };
+
+        // Log messages from the server
+        connection.onmessage = function (e) {
+            var parsed =  (typeof e.data === 'string')
+                ? JSON.parse(e.data)
+                : e.data;
+
+            log('message: ' + JSON.stringify(parsed, null, 2));
+
+            const type = parsed.type || '';
+
+            messages[type](parsed.message);
+        };
+
+        function send(type, args) {
+            var payload = Object.assign({type: type}, args);
+            connection.send(JSON.stringify(payload));
+        }
+
+        document.querySelectorAll('.controls span.glyphicon').forEach(function (itm, idx) {
+            const event = itm.attributes['data-event'].value;
+            itm.onclick = function () {
+                send(event);
+            };
+        })
+
+	</script>
+</body>
+</html>
